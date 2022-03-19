@@ -66,9 +66,9 @@ static ssize_t demo_read(struct file *filp,
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         on_each_cpu(quiesce_pid, (void*)pid, 1);
         struct task_struct *task;
-        pid_t _pid = find_get_pid(pid);
+        struct pid* _pid = find_get_pid(pid);
         kill_pid(_pid, SIGSTOP, 1);
-        task = get_pid_task(find_vpid(_pid), PIDTYPE_PID);
+        task = get_pid_task(_pid, PIDTYPE_PID);
         if(task == NULL){
             printk(KERN_INFO "task is null\n");
             return -1;
