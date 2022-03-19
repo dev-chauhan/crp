@@ -13,7 +13,7 @@
 #include <asm/tlbflush.h>
 #include<linux/uaccess.h>
 #include<linux/device.h>
-
+#include<linux/delay.h>
 
 #define DEVNAME "crp"
 
@@ -73,7 +73,7 @@ static ssize_t demo_read(struct file *filp,
             printk(KERN_INFO "task is null\n");
             return -1;
         }
-        printk(KERN_INFO "task %d status %d\n", task->pid, task_state(task));
+        printk(KERN_INFO "task %d status %d\n", task->pid, task->state);
         
         msleep(3000);
         kill_pid(_pid, SIGCONT, 1);
