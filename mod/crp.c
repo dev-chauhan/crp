@@ -51,12 +51,13 @@ static void quiesce_pid(void* args)
 }
 
 static ssize_t demo_read(struct file *filp,
-                           char *buffer,
+                           char __user*buffer,
                            size_t length,
                            loff_t * offset)
 {           
         printk(KERN_INFO "In read\n");
         unsigned long* args = (unsigned long*)buffer;
+        printk(KER_INFO "args %x\n", args);
         int command = args[0];
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
