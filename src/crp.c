@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
     char *name = argv[3];
 
     int fd;
-    if((fd = open("/dev/crp")) < 0)
+    if((fd = open("/dev/crp", O_RDWR)) < 0)
     {
         printf("Error: open /dev/crp failed\n");
         return -1;
