@@ -43,15 +43,25 @@ static int demo_release(struct inode *inode, struct file *file)
         return 0;
 }
 
+static void quiesce_pid(void* args)
+{
+    int pid = (int)args;
+    struct task_struct *task;
+    printk(KERN_INFO "quiesce_pid: pid = %d\n", pid);
+}
+
 static ssize_t demo_read(struct file *filp,
                            char *buffer,
                            size_t length,
                            loff_t * offset)
 {           
         printk(KERN_INFO "In read\n");
-        if (copy_to_user(buffer,&gptr,sizeof(unsigned long)) == 0)
-             return sizeof(unsigned long);
-        return -1;
+        unsigned long* args = (unsigned long*)buffer;
+        int command = args[0];
+        int pid = args[1];
+        on_each_cpu(quiesce_pid, (void*)pid, 1);
+        printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
+        return length;
 }
 
 static ssize_t
