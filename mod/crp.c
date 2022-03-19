@@ -56,14 +56,19 @@ static ssize_t demo_read(struct file *filp,
                            loff_t * offset)
 {           
         printk(KERN_INFO "In read\n");
-        unsigned long* args = (unsigned long*)buffer;
-        printk(KER_INFO "args %x\n", args);
-        int command = args[0];
-        int pid = args[1];
+        unsigned long* args = kzalloc(length, GFP_KERNEL);
+	if(copy_from_user(args, buffer, length) == 0){
+
+        printk(KERN_INFO "args %x buffer %x\n", args, buffer);
+	printk(KERN_INFO "v1 %d v2 %d\n", *(args), *(args + 1));
+        int command = 0;
+        int pid = 1;
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         on_each_cpu(quiesce_pid, (void*)pid, 1);
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
-        return length;
+	return length;
+	}
+        return -1;
 }
 
 static ssize_t

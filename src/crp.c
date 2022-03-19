@@ -26,6 +26,7 @@ int main(int argc, char *argv[])
     if(strcmp(command, "checkpoint") == 0)
     {
         unsigned long args[2] = {0, pid};
+	unsigned long x = 1;
         printf("checkpoint %d pid %d %x\n", args[0], args[1], args);
         if(read(fd, args, sizeof(args)) < 0)
         {
