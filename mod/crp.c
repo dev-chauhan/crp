@@ -48,6 +48,7 @@ static void quiesce_pid(void* args)
     // int pid = (int)args;
     // struct task_struct *task;
     printk("quiesce_pid: cpu id %d\n", smp_processor_id());
+    printk("quiesce_pid: pid %d\n", current->pid);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -55,30 +56,29 @@ static ssize_t demo_read(struct file *filp,
                            size_t length,
                            loff_t * offset)
 {           
-        printk(KERN_INFO "In read\n");
-        unsigned long* args = kzalloc(length, GFP_KERNEL);
+    printk(KERN_INFO "In read\n");
+    unsigned long* args = kzalloc(length, GFP_KERNEL);
 	if(copy_from_user(args, buffer, length) == 0){
-
         printk(KERN_INFO "args %x buffer %x\n", args, buffer);
-	printk(KERN_INFO "v1 %d v2 %d\n", *(args), *(args + 1));
-        int command = 0;
-        int pid = 1;
+        printk(KERN_INFO "v1 %d v2 %d\n", *(args), *(args + 1));
+        int command = args[0];
+        int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         on_each_cpu(quiesce_pid, (void*)pid, 1);
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
-	return length;
+        return length;
 	}
-        return -1;
+    return -1;
 }
 
 static ssize_t
 demo_write(struct file *filp, const char *buff, size_t len, loff_t * off)
 {
            
-        printk(KERN_INFO "In write\n");
-        if(copy_from_user(&gptr,buff,sizeof(unsigned long)) == 0)
-             return sizeof(unsigned long);
-        return -1;
+    printk(KERN_INFO "In write\n");
+    if(copy_from_user(&gptr,buff,sizeof(unsigned long)) == 0)
+            return sizeof(unsigned long);
+    return -1;
 }
 
 static struct file_operations fops = {
