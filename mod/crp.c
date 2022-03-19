@@ -67,13 +67,18 @@ static ssize_t demo_read(struct file *filp,
         on_each_cpu(quiesce_pid, (void*)pid, 1);
         struct task_struct *task;
         pid_t _pid = find_get_pid(pid);
+        kill_pid(_pid, SIGSTOP, 1);
         task = get_pid_task(find_vpid(_pid), PIDTYPE_PID);
         if(task == NULL){
             printk(KERN_INFO "task is null\n");
             return -1;
         }
         printk(KERN_INFO "task %d status %d\n", task->pid, task_state(task));
+        
+        msleep(3000);
+        kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
+        
         return length;
 	}
     return -1;
