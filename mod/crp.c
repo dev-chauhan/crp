@@ -45,9 +45,9 @@ static int demo_release(struct inode *inode, struct file *file)
 
 static void quiesce_pid(void* args)
 {
-    int pid = (int)args;
-    struct task_struct *task;
-    printk(KERN_INFO "quiesce_pid: pid = %d\n", pid);
+    // int pid = (int)args;
+    // struct task_struct *task;
+    printk("quiesce_pid: cpu id %d\n", smp_processor_id());
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -59,6 +59,7 @@ static ssize_t demo_read(struct file *filp,
         unsigned long* args = (unsigned long*)buffer;
         int command = args[0];
         int pid = args[1];
+        printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         on_each_cpu(quiesce_pid, (void*)pid, 1);
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         return length;
