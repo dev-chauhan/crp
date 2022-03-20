@@ -43,6 +43,28 @@ static int demo_release(struct inode *inode, struct file *file)
         return 0;
 }
 
+int dump_struct(void* buff, int length, char* fname){
+    struct file* fp = filp_open(fname, O_RDWR | O_CREAT, S_IRWXU);
+    if(!fp) return -1;
+    loff_t pos = 0;
+    unsigned long err;
+    err = kernel_write(fp, buff, length, &pos);
+    flip_close(fp, NULL);
+    if(err != length) return -1;
+    return err;
+}
+
+int read_struct(void* buff, int length, char* fname){
+    struct file* fp = filp_open(fname, O_RDONLY);
+    if(!fp) return -1;
+    loff_t pos = 0;
+    unsigned long err;
+    err = kernel_read(fp, buff, length, &pos);
+    flip_close(fp, NULL);
+    if(err != length) return -1;
+    return err;
+}
+
 static void quiesce_pid(void* args)
 {
     // int pid = (int)args;
