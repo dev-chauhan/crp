@@ -14,6 +14,7 @@
 #include<linux/uaccess.h>
 #include<linux/device.h>
 #include<linux/delay.h>
+#include<linux/kallsyms.h>
 
 #define DEVNAME "crp"
 
@@ -22,6 +23,7 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
+unsigned long (*kln)(const char *) = 0xffffffffa5344fc0;
 
 static unsigned long gptr;
 
@@ -49,18 +51,18 @@ int dump_struct(void* buff, int length, char* fname){
     loff_t pos = 0;
     unsigned long err;
     err = kernel_write(fp, buff, length, &pos);
-    flip_close(fp, NULL);
+    filp_close(fp, NULL);
     if(err != length) return -1;
     return err;
 }
 
 int read_struct(void* buff, int length, char* fname){
-    struct file* fp = filp_open(fname, O_RDONLY);
+    struct file* fp = filp_open(fname, O_RDONLY, 0);
     if(!fp) return -1;
     loff_t pos = 0;
     unsigned long err;
     err = kernel_read(fp, buff, length, &pos);
-    flip_close(fp, NULL);
+    filp_close(fp, NULL);
     if(err != length) return -1;
     return err;
 }
@@ -96,7 +98,7 @@ static ssize_t demo_read(struct file *filp,
             return -1;
         }
         printk(KERN_INFO "task %d status %d\n", task->pid, task->state);
-        
+        dump_struct("XYZ", 4, "tmp");
         msleep(3000);
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
@@ -159,7 +161,7 @@ int init_module(void)
         printk(KERN_INFO "I was assigned major number %d. To talk to\n", major);                                                              
         atomic_set(&device_opened, 0);
        
-
+	printk(KERN_INFO "dup_mm: %x kln: %x dup_mm: %p\n", kln("dup_mm"), kln, kln("dup_mm"));
 	return 0;
 
 error_device:
