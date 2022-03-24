@@ -15,6 +15,7 @@
 #include<linux/device.h>
 #include<linux/delay.h>
 #include<linux/kallsyms.h>
+#include<linux/sched/task_stack.h>
 
 #define DEVNAME "crp"
 
@@ -23,7 +24,7 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
-unsigned long (*kln)(const char *) = 0xffffffffa5344fc0;
+// unsigned long (*kln)(const char *) = 0xffffffffa5344fc0;
 
 static unsigned long gptr;
 
@@ -76,15 +77,15 @@ static void quiesce_pid(void* args)
 }
 
 static void ckpt_cpu_state(pid_t pidno){
-    struct pid* _pid = find_get_pid(pid);
+    struct pid* _pid = find_get_pid(pidno);
     struct task_struct *task = get_pid_task(_pid, PIDTYPE_PID);
     if(task == NULL){
         printk(KERN_INFO "task is null\n");
-        return -1;
+        return;
     }
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = task_pt_regs(task);
-    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->eax);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -172,7 +173,7 @@ int init_module(void)
         printk(KERN_INFO "I was assigned major number %d. To talk to\n", major);                                                              
         atomic_set(&device_opened, 0);
        
-	printk(KERN_INFO "dup_mm: %x kln: %x dup_mm: %p\n", kln("dup_mm"), kln, kln("dup_mm"));
+// 	printk(KERN_INFO "dup_mm: %x kln: %x dup_mm: %p\n", kln("dup_mm"), kln, kln("dup_mm"));
 	return 0;
 
 error_device:
