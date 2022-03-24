@@ -75,6 +75,18 @@ static void quiesce_pid(void* args)
     printk("quiesce_pid: pid %d\n", current->pid);
 }
 
+static void ckpt_cpu_state(pid_t pidno){
+    struct pid* _pid = find_get_pid(pid);
+    struct task_struct *task = get_pid_task(_pid, PIDTYPE_PID);
+    if(task == NULL){
+        printk(KERN_INFO "task is null\n");
+        return -1;
+    }
+    // struct pt_regs* regs = task->thread.regs;
+    struct pt_regs* regs = task_pt_regs(task);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->eax);
+}
+
 static ssize_t demo_read(struct file *filp,
                            char __user*buffer,
                            size_t length,
@@ -82,9 +94,7 @@ static ssize_t demo_read(struct file *filp,
 {           
     printk(KERN_INFO "In read\n");
     unsigned long* args = kzalloc(length, GFP_KERNEL);
-	if(copy_from_user(args, buffer, length) == 0){
-        printk(KERN_INFO "args %x buffer %x\n", args, buffer);
-        printk(KERN_INFO "v1 %d v2 %d\n", *(args), *(args + 1));
+    if(copy_from_user(args, buffer, length) == 0){
         int command = args[0];
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
@@ -98,8 +108,9 @@ static ssize_t demo_read(struct file *filp,
             return -1;
         }
         printk(KERN_INFO "task %d status %d\n", task->pid, task->state);
-        dump_struct("XYZ", 4, "tmp");
-        msleep(3000);
+        // start checkpointing
+        ckpt_cpu_state(pid);
+        // finished
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
         
