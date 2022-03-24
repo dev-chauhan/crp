@@ -86,6 +86,10 @@ static void ckpt_cpu_state(pid_t pidno){
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = task_pt_regs(task);
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
+    if(dump_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
+        printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
+        return;
+    }
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -116,8 +120,19 @@ static ssize_t demo_read(struct file *filp,
         put_pid(_pid);
         
         return length;
-	}
+    }
     return -1;
+}
+
+static void rest_cpu_state(pid_t pidno){
+    // struct pt_regs* regs = task->thread.regs;
+    struct pt_regs* regs = current_pt_regs();
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
+        printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
+        return;
+    }
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
 }
 
 static ssize_t
@@ -125,8 +140,18 @@ demo_write(struct file *filp, const char *buff, size_t len, loff_t * off)
 {
            
     printk(KERN_INFO "In write\n");
-    if(copy_from_user(&gptr,buff,sizeof(unsigned long)) == 0)
-            return sizeof(unsigned long);
+    unsigned long* args = kzalloc(length, GFP_KERNEL);
+    if(copy_from_user(args, buffer, length) == 0){
+        int command = args[0];
+        int pid = args[1];
+        printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
+        
+        // start restoring
+        rest_cpu_state(pid);
+        // finished
+        
+        return length;
+    }
     return -1;
 }
 
