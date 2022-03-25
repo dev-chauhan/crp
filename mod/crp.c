@@ -14,6 +14,8 @@
 #include<linux/uaccess.h>
 #include<linux/device.h>
 #include<linux/delay.h>
+#include<linux/kallsyms.h>
+#include<linux/sched/task_stack.h>
 
 #include "crp.h"
 
@@ -26,6 +28,7 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
+// unsigned long (*kln)(const char *) = 0xffffffffa5344fc0;
 
 static unsigned long gptr;
 
@@ -167,12 +170,50 @@ static int demo_release(struct inode *inode, struct file *file)
         return 0;
 }
 
+int dump_struct(void* buff, int length, char* fname){
+    struct file* fp = filp_open(fname, O_RDWR | O_CREAT, S_IRWXU);
+    if(!fp) return -1;
+    loff_t pos = 0;
+    unsigned long err;
+    err = kernel_write(fp, buff, length, &pos);
+    filp_close(fp, NULL);
+    if(err != length) return -1;
+    return err;
+}
+
+int read_struct(void* buff, int length, char* fname){
+    struct file* fp = filp_open(fname, O_RDONLY, 0);
+    if(!fp) return -1;
+    loff_t pos = 0;
+    unsigned long err;
+    err = kernel_read(fp, buff, length, &pos);
+    filp_close(fp, NULL);
+    if(err != length) return -1;
+    return err;
+}
+
 static void quiesce_pid(void* args)
 {
     // int pid = (int)args;
     // struct task_struct *task;
     printk("quiesce_pid: cpu id %d\n", smp_processor_id());
     printk("quiesce_pid: pid %d\n", current->pid);
+}
+
+static void ckpt_cpu_state(pid_t pidno){
+    struct pid* _pid = find_get_pid(pidno);
+    struct task_struct *task = get_pid_task(_pid, PIDTYPE_PID);
+    if(task == NULL){
+        printk(KERN_INFO "task is null\n");
+        return;
+    }
+    // struct pt_regs* regs = task->thread.regs;
+    struct pt_regs* regs = task_pt_regs(task);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
+    if(dump_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
+        printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
+        return;
+    }
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -182,9 +223,7 @@ static ssize_t demo_read(struct file *filp,
 {           
     printk(KERN_INFO "In read\n");
     unsigned long* args = kzalloc(length, GFP_KERNEL);
-	if(copy_from_user(args, buffer, length) == 0){
-        printk(KERN_INFO "args %x buffer %x\n", args, buffer);
-        printk(KERN_INFO "v1 %d v2 %d\n", *(args), *(args + 1));
+    if(copy_from_user(args, buffer, length) == 0){
         int command = args[0];
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
@@ -198,14 +237,26 @@ static ssize_t demo_read(struct file *filp,
             return -1;
         }
         printk(KERN_INFO "task %d status %d\n", task->pid, task->state);
-        
-        msleep(3000);
+        // start checkpointing
+        ckpt_cpu_state(pid);
+        // finished
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
         
         return length;
-	}
+    }
     return -1;
+}
+
+static void rest_cpu_state(pid_t pidno){
+    // struct pt_regs* regs = task->thread.regs;
+    struct pt_regs* regs = current_pt_regs();
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
+        printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
+        return;
+    }
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
 }
 
 static ssize_t
@@ -213,8 +264,18 @@ demo_write(struct file *filp, const char *buff, size_t len, loff_t * off)
 {
            
     printk(KERN_INFO "In write\n");
-    if(copy_from_user(&gptr,buff,sizeof(unsigned long)) == 0)
-            return sizeof(unsigned long);
+    unsigned long* args = kzalloc(length, GFP_KERNEL);
+    if(copy_from_user(args, buffer, length) == 0){
+        int command = args[0];
+        int pid = args[1];
+        printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
+        
+        // start restoring
+        rest_cpu_state(pid);
+        // finished
+        
+        return length;
+    }
     return -1;
 }
 
@@ -261,7 +322,7 @@ int init_module(void)
         printk(KERN_INFO "I was assigned major number %d. To talk to\n", major);                                                              
         atomic_set(&device_opened, 0);
        
-
+// 	printk(KERN_INFO "dup_mm: %x kln: %x dup_mm: %p\n", kln("dup_mm"), kln, kln("dup_mm"));
 	return 0;
 
 error_device:
