@@ -15,7 +15,11 @@
 #include<linux/device.h>
 #include<linux/delay.h>
 
+#include "crp.h"
+
 #define DEVNAME "crp"
+#define MAX_FNAME 35
+#define PAGE_SIZE 1 << 12
 
 static int major;
 atomic_t  device_opened;
@@ -24,6 +28,126 @@ struct device *demo_device;
 
 
 static unsigned long gptr;
+
+// checkpointing functions
+
+static pte_t* get_page(unsigned long address, struct mm_struct* mm){
+        pgd_t *pgd;
+        p4d_t *p4d;
+        pud_t *pud;
+        pmd_t *pmd;
+        pte_t *ptep;
+
+        pgd = pgd_offset(mm, address);
+        if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+                goto nul_ret;
+        // printk(KERN_INFO "pgd(va) [%lx] pgd (pa) [%lx] *pgd [%lx]\n", (unsigned long)pgd, __pa(pgd), pgd->pgd); 
+        p4d = p4d_offset(pgd, address);
+        if (p4d_none(*p4d))
+                goto nul_ret;
+        if (unlikely(p4d_bad(*p4d)))
+                goto nul_ret;
+        pud = pud_offset(p4d, address);
+        if (pud_none(*pud))
+                goto nul_ret;
+        if (unlikely(pud_bad(*pud)))
+                goto nul_ret;
+        // printk(KERN_INFO "pud(va) [%lx] pud (pa) [%lx] *pud [%lx]\n", (unsigned long)pud, __pa(pud), pud->pud); 
+
+        pmd = pmd_offset(pud, address);
+        if (pmd_none(*pmd))
+                goto nul_ret;
+        if (unlikely(pmd_trans_huge(*pmd))){
+                // printk(KERN_INFO "I am huge\n");
+                // Huge page, get huge page from pmd
+                goto nul_ret;
+        }
+        // printk(KERN_INFO "pmd(va) [%lx] pmd (pa) [%lx] *pmd [%lx]\n", (unsigned long)pmd, __pa(pmd), pmd->pmd); 
+        ptep = pte_offset_map(pmd, address);
+        if(!ptep){
+                printk(KERN_INFO "pte_p is null\n\n");
+                goto nul_ret;
+        }
+        // printk(KERN_INFO "pte(va) [%lx] pte (pa) [%lx] *pte [%lx]\n", (unsigned long)ptep, __pa(ptep), ptep->pte); 
+        return pte_page(ptep);
+
+        nul_ret:
+        //        printk(KERN_INFO "Address could not be translated\n");
+               return NULL;
+
+}
+
+static void do_ckp_vma(struct pid* pid){
+        struct task_struct* proc = get_pid_task(pid);
+        // Iterate over and copy to /checkpoint/vma/randomid
+        struct mm_struct *mm = proc->mm;
+        struct vm_area_struct *vma = mm->mmap;
+        
+        if(!vma){
+                 printk(KERN_INFO "No vma yet\n");
+                 goto nul_ret;
+        }
+        int id = 0;             // This should be some random hash
+        struct vma_copy* block = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
+        while(vma){
+                block->vm_flags = vma->vm_flags;
+                block->vm_start = vma->vm_start;
+                block->vm_end = vma->vm_end;
+                block->vm_next = vma->vm_next;
+                char fname[MAX_FNAME];
+                snprintf(fname, MAX_FNAME, "/checkpoint/vma/%d", id++);
+                dump_struct(block, sizeof(struct vma_copy), fname);
+                do_ckp_mem(pid, )
+                vma = vma->vm_next;
+        }
+        kfree(block);
+        put_task_struct(proc);
+        return;
+
+nul_ret:
+       printk(KERN_INFO "Can not walk vma\n");
+      return;
+}
+
+static void do_ckp_mem(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
+        // Iterate over and copy to /checkpoint/mem/randomid
+        unsigned long address;
+        int id = 0;
+        for (address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
+                struct page* curr = get_page(address, mm);
+                char fname[MAX_FNAME];
+                snprintf(fname, MAX_FNAME, "/checkpoint/page/%d", id);
+                dump_struct(curr, sizeof(struct page), fname);
+
+                snprintf(fname, MAX_FNAME, "/checkpoint/mem/%d", id++);
+                dump_struct(curr, PAGE_SIZE, fname);            // TODO: get page from struct page
+        }
+        put_task_struct(proc);
+        return;
+}
+
+static void do_ckp_proc(struct pid* pid){
+        struct task_struct* proc = get_pid_task(pid);
+        
+        // Iterate over and copy to /checkpoint/proc/randomid
+
+        put_task_struct(proc);
+        return;
+}
+
+// Restore functions 
+
+static void do_rst_vma(struct pid* pid){
+
+}
+
+static void do_rst_mem(struct pid* pid){
+
+}
+
+static void do_rst_proc(struct pid* pid){
+
+}
 
 
 static int demo_open(struct inode *inode, struct file *file)
