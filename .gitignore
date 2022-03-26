@@ -1,4 +1,6 @@
 bin/
+obj/
+*.mod
 .*.mod
 .*.cmd
 .tmp_versions
@@ -9,3 +11,4 @@ Module.symvers
 modules.order
 *.swp
 *.ckpt
+*.o.*
