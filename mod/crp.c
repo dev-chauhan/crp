@@ -16,6 +16,7 @@
 #include<linux/delay.h>
 #include<linux/kallsyms.h>
 #include<linux/sched/task_stack.h>
+#include<linux/ptrace.h>
 
 #include "crp.h"
 
@@ -268,11 +269,14 @@ static void ckpt_cpu_state(pid_t pidno){
     }
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = task_pt_regs(task);
-    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld\n", regs->ax);
-    if(dump_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
+    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    if(dump_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
         return;
     }
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
+    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -308,19 +312,22 @@ static ssize_t demo_read(struct file *filp,
     return -1;
 }
 
-// static void rest_cpu_state(pid_t pidno){
-//     // struct pt_regs* regs = task->thread.regs;
-//     struct pt_regs* regs = current_pt_regs();
-//     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
-//     if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") < 0){
-//         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
-//         return;
-//     }
-//     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
-// }
+static void rest_cpu_state(pid_t pidno){
+    // struct pt_regs* regs = task->thread.regs;
+    struct pt_regs* regs = current_pt_regs();
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    printk(KERN_INFO "rest_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
+        printk(KERN_INFO "rest_cpu_state: dump struct failed\n");
+        return;
+    }
+    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    printk(KERN_INFO "rest_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+}
 
 static ssize_t
-demo_write(struct file *filp, const char *buffer, size_t length, loff_t * off){
+demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset)
+{
            
     printk(KERN_INFO "In write\n");
     unsigned long* args = kzalloc(length, GFP_KERNEL);
