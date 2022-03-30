@@ -141,9 +141,12 @@ static void do_ckp_vma(struct pid* pid){
 		block->vm_end = vma->vm_end;
 		block->vm_next = (uint64_t)vma->vm_next;
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "vma/%d.ckpt", id++);
+		snprintf(fname, MAX_FNAME, "vma_%d.ckpt", id++);
 		printk("Checkpointing at %s\n", fname);
-		dump_struct((char*)block, sizeof(struct vma_copy), fname);
+		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
+			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
+			return;
+		}
 		// do_ckp_mem(pid, )
 		vma = vma->vm_next;
 	}
@@ -164,6 +167,7 @@ static void do_ckp_mem(struct pid* pid, struct mm_struct* mm, struct vm_area_str
 		pte_t* ptep = get_pte(address, mm);
 		struct page* curr = pte_page(*ptep);
 		char fname[MAX_FNAME];
+		// This would result in segfault -- folders need to be created. 
 		snprintf(fname, MAX_FNAME, "/home/paras/Desktop/checkpoint/page/%lx.ckpt",address);
 		dump_struct((char*)curr, sizeof(struct page), fname);
 
@@ -198,14 +202,19 @@ static void do_rst_vma(struct pid* pid){
 	// We might need to return the vma(head) kernel address. 
 	int next_vma = 0;
 	struct vma_copy *vcopy = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
+	struct vm_area_struct *prev = NULL;
 	while(next_vma > 0){
 		// allocate buffer and read vma. 
 		struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "/home/paras/Desktop/checkpoint/vma/%d.ckpt", next_vma);
+		snprintf(fname, MAX_FNAME, "vma%d.ckpt", next_vma);		// directory structure 
 		read_struct(vcopy, sizeof(struct vma_copy), fname);
 		vma->vm_start = vcopy->vm_start;
 		vma->vm_end = vcopy->vm_end;
+		if (prev){
+			prev->vm_next = vma;
+		}
+		prev = vma;
 		vma->vm_next = NULL;			// This will be generated in the next iteration, recursive approach?
 		// Update next_vma by lookup using vcopy->vm_next
 		next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
@@ -271,7 +280,9 @@ static void ckpt_cpu_state(pid_t pidno){
     struct pt_regs* regs = task_pt_regs(task);
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
     printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
-    if(dump_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
+	char fname[MAX_FNAME];
+	snprintf(fname, MAX_FNAME, "cpu_state%d.ckpt", pidno);
+    if(dump_struct(regs, sizeof(struct pt_regs), fname) != sizeof(struct pt_regs)){
         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
         return;
     }
@@ -301,8 +312,8 @@ static ssize_t demo_read(struct file *filp,
         }
         printk(KERN_INFO "task %d status %ld\n", task->pid, task->state);
         // start checkpointing
-        ckpt_cpu_state(pid);
-        // do_ckp_vma(_pid);
+        // ckpt_cpu_state(pid);
+        do_ckp_vma(_pid);
         // finished
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
