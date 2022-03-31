@@ -18,6 +18,7 @@
 #include<linux/sched/task_stack.h>
 #include<linux/ptrace.h>
 #include<linux/highmem.h>
+#include<asm/pgtable.h>
 
 #include "crp.h"
 
@@ -459,9 +460,11 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
 		printk(KERN_INFO "starting vma restore");
 		get_vma(current->mm);
 		do_rst_vma(NULL);
+		flush_tlb_all();
 		get_vma(current->mm);
 		printk(KERN_INFO "starting mem restore");
 		do_rst_mem(NULL);
+		flush_tlb_all();
 		// finished
 		printk(KERN_INFO "finished restore\n");
         
