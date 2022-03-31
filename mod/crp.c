@@ -111,6 +111,42 @@ int read_struct(void* buff, int length, char* fname){
     return err;
 }
 
+static void get_vma(struct mm_struct* mm)
+{
+        struct vm_area_struct *vma = mm->mmap;
+        char flags[4] = {'-'};
+        if(!vma){
+                 printk(KERN_INFO "No vma yet\n");
+                 goto nul_ret;
+        }
+        while(vma){
+            flags[0] = flags[1] = flags[2] = '-';
+            if(vma->vm_flags&(VM_READ)){
+                flags[0] = 'R';
+            }
+            if(vma->vm_flags&(VM_WRITE)){
+                flags[1] = 'W';
+            }
+            if(vma->vm_flags&(VM_EXEC)){
+                flags[2] = 'X';
+            }
+            flags[3] = '\0';
+            if(vma->vm_flags&(VM_STACK)){
+                printk(KERN_INFO "start:%lx end:%lx flags:%s %s\n",vma->vm_start, vma->vm_end,flags,"STACK");
+            }
+            printk(KERN_INFO "start:%lx end:%lx flags:%s\n",vma->vm_start, vma->vm_end,flags);
+            vma = vma->vm_next;
+        
+        }
+        return;
+        
+nul_ret:
+       printk(KERN_INFO "Can not walk vma\n");
+      return;
+
+
+}
+
 static void do_ckp_vma(struct pid* pid){
 	struct vm_area_struct* block;
 	int id = 1;
@@ -157,6 +193,7 @@ static void do_ckp_vma(struct pid* pid){
 		return;
 	}
 	kfree(block);
+	get_vma(mm);
 	put_task_struct(proc);
 	return;
 
@@ -284,9 +321,10 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 			kfree(curr);
 			continue;
 		}
-		// Allocate page in user space how tf do I do this. 
-		if(copy_to_user(address, curr, PAGE_SIZE) != 0){
-            printk(KERN_INFO "cannot write to %p\n", address);
+		// Allocate page in user space how tf do I do this.
+		int err; 
+		if((err = copy_to_user(address, curr, PAGE_SIZE)) != 0){
+            printk(KERN_INFO "cannot write to %p, err %d\n", address, err);
             return;
         }
 		written_pages++;
@@ -436,7 +474,9 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         // start restoring
         rest_cpu_state(pid);
 	printk(KERN_INFO "starting vma restore");
+	get_vma(current->mm);
 		do_rst_vma(NULL);
+		get_vma(current->mm);
 		printk(KERN_INFO "starting mem restore");
 		do_rst_mem(NULL);
 		// finished
