@@ -406,6 +406,9 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 		// Allocate page in user space how tf do I do this. 
 		if(copy_to_user(address, curr, PAGE_SIZE) != 0){
             printk(KERN_INFO "cannot write to %p\n", address);
+			for(int i = 0; i < PAGE_SIZE; i++){
+				*(((char*)address) + i) = curr[i];
+			}
             return;
         }
 		kfree(curr);
