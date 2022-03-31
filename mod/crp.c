@@ -86,13 +86,13 @@ static pte_t* get_pte(unsigned long address, struct mm_struct* mm){
 int dump_struct(void* buff, int length, char* fname){
     loff_t pos;
 	unsigned long err;
-	printk(KERN_INFO "Before file open\n");
+	// printk(KERN_INFO "Before file open\n");
 	struct file* fp = filp_open(fname, O_RDWR | O_CREAT, S_IRWXU);
 	pos = 0;
-    if(!fp) return -1;
-	printk(KERN_INFO "Before kernel_write\n");
+    if(IS_ERR(fp)) return -1;
+	// printk(KERN_INFO "Before kernel_write\n");
     err = kernel_write(fp, buff, length, &pos);
-	printk(KERN_INFO "After kernel_write\n");
+	// printk(KERN_INFO "After kernel_write\n");
     filp_close(fp, NULL);
     if(err != length) return -1;
     return err;
@@ -103,7 +103,8 @@ int read_struct(void* buff, int length, char* fname){
     unsigned long err;
 	struct file* fp = filp_open(fname, O_RDONLY, 0);
 	pos = 0;
-    if(!fp) return -1;
+	// printk(KERN_INFO "%p filp_open return\n", fp);
+    if(IS_ERR(fp)) return -1;
 	err = kernel_read(fp, (char*)buff, length, &pos);
     filp_close(fp, NULL);
     if(err != length) return -1;
@@ -136,7 +137,7 @@ static void do_ckp_vma(struct pid* pid){
 		printk(KERN_INFO "Can't allocate memory\n");
 		goto nul_ret;
 	}
-	printk(KERN_INFO "before while\n");
+	// printk(KERN_INFO "before while\n");
 	while(vma){
 		block->vm_flags = vma->vm_flags;
 		block->vm_start = vma->vm_start;
@@ -144,7 +145,7 @@ static void do_ckp_vma(struct pid* pid){
 		block->vm_next = (uint64_t)vma->vm_next;
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);
-		printk("Checkpointing at %s\n", fname);
+		// printk("Checkpointing at %s\n", fname);
 		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
 			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
 			return;
@@ -204,6 +205,7 @@ static void do_ckp_mem(struct pid* pid){
 		vma = vma->vm_next;
 	}
 	put_task_struct(proc);
+nul_ret:
 	return;
 }
 // static void do_ckp_proc(struct pid* pid){
@@ -251,16 +253,20 @@ static void do_rst_vma(struct pid* pid){
 	kfree(vcopy);
 }
 
-static void do_rst_mem_vma(struct pid* pid, struct vm_area_struct* vma){
+static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
 	// iterate over address space
 	unsigned long address;
+	printk(KERN_INFO "%p %p\n", mm, vma);
 	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
 		// allocate a buffer of size page and read a page to it. 
 		// Directly allocate a page and copy to it if possible, don't think linux allows that. 
 		char* curr = kzalloc(PAGE_SIZE, GFP_KERNEL);			
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%ld.ckpt", CURR_DIR, address);
+		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%lx.ckpt", CURR_DIR, address);
+		// printk(KERN_INFO "%p %s\n", address, fname);
+		
 		if(read_struct(curr, PAGE_SIZE, fname) < 0){ // file does not exist
+			kfree(curr);
 			continue;
 		}
 		// Allocate page in user space how tf do I do this. 
@@ -268,6 +274,7 @@ static void do_rst_mem_vma(struct pid* pid, struct vm_area_struct* vma){
             printk(KERN_INFO "cannot write to %p\n", address);
             return;
         }
+		kfree(curr);
 		// Put this page into page table. 
 	}	
 }
@@ -292,7 +299,8 @@ static void do_rst_mem(struct pid* pid){
 		do_rst_mem_vma(pid, mm, vma);
 		vma = vma->vm_next;
 	}
-	flush_tlb_mm(mm);
+	flush_cache_mm(mm);
+nul_ret:
 	// put_task_struct(proc);
 	return;
 }
@@ -337,15 +345,15 @@ static void ckpt_cpu_state(pid_t pidno){
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = task_pt_regs(task);
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
-    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 	char fname[MAX_FNAME];
-	snprintf(fname, MAX_FNAME, "cpu_state%d.ckpt", pidno);
+	snprintf(fname, MAX_FNAME, "cpu_state.ckpt", pidno);
     if(dump_struct(regs, sizeof(struct pt_regs), fname) != sizeof(struct pt_regs)){
         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
         return;
     }
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
-    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -386,13 +394,13 @@ static void rest_cpu_state(pid_t pidno){
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = current_pt_regs();
     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
-    printk(KERN_INFO "rest_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
     if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
         printk(KERN_INFO "rest_cpu_state: dump struct failed\n");
         return;
     }
     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
-    printk(KERN_INFO "rest_cpu_state: cs-ip reg %d-%d\n", regs->cs, regs->ip);
+    printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 }
 
 static ssize_t
@@ -406,10 +414,13 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         
+	// struct pid* _pid = find_get_pid(pid);
         // start restoring
         rest_cpu_state(pid);
-		do_rst_vma(_pid);
-		do_rst_mem(_pid);
+	printk(KERN_INFO "starting vma restore");
+		do_rst_vma(NULL);
+		printk(KERN_INFO "starting mem restore");
+		do_rst_mem(NULL);
 		// finished
         
         return length;
