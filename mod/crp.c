@@ -113,7 +113,7 @@ int read_struct(void* buff, int length, char* fname){
 
 static void do_ckp_vma(struct pid* pid){
 	struct vma_copy* block;
-	int id = 0;
+	int id = 1;
 	struct task_struct* proc = get_pid_task(pid, PIDTYPE_PID);
 	if (!proc){
 		printk(KERN_INFO "Got NULL proc\n");
@@ -146,12 +146,18 @@ static void do_ckp_vma(struct pid* pid){
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);
 		// printk("Checkpointing at %s\n", fname);
+		if(block->vm_next != NULL) block->vm_next = id;
+		if(block->vm_prev != NULL) block->vm_prev = id-2;
 		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
 			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
 			return;
 		}
 		// do_ckp_mem(pid, )
 		vma = vma->vm_next;
+	}
+	if(dump_struct(&id, sizeof(int), "./checkpoint/vma/len.ckpt") != sizeof(int)){
+		printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
+		return;
 	}
 	kfree(block);
 	put_task_struct(proc);
@@ -233,23 +239,36 @@ static void do_rst_vma(struct pid* pid){
 	int next_vma = 0;
 	struct vma_copy *vcopy = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
 	struct vm_area_struct *prev = NULL;
+	int len;
+	if(read_struct(&len, sizeof(int), "./checkpoint/vma/len.ckpt") != sizeof(int)){
+		printk(KERN_INFO "do_rst_vma: read struct failed\n");
+		return;
+	}
+	struct vm_area_struct *vmas[len]; // TODO: use hashmap in future, works for now
+	for(int i=0; i < len; i++) vmas[i] = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
+	next_vma = 1;
 	while(next_vma > 0){
 		// allocate buffer and read vma. 
-		struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
+		// struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", next_vma);		// directory structure 
 		read_struct(vcopy, sizeof(struct vma_copy), fname);
 		vma->vm_start = vcopy->vm_start;
 		vma->vm_end = vcopy->vm_end;
-		if (prev){
-			prev->vm_next = vma;
-		}
-		prev = vma;
-		vma->vm_next = NULL;			// This will be generated in the next iteration, recursive approach?
+		vma->vm_next = vcopy->vm_next;
+		vma->vm_prev = vcopy->vm_prev;
+
+		// get the kernel space addr from vmas[ ] array
+		if(vma->vm_next != NULL) vma->vm_next = vmas[vma->vm_next];
+		if(vma->vm_prev != NULL) vma->vm_prev = vmas[vma->vm_prev];
 		// Update next_vma by lookup using vcopy->vm_next
-		next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
+		// next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
+		next_vma++; // TODO: use hashmap in future, works for now
 		// restore pages for this vma
+		// set vm_mm
+		vma->vm_mm = current->mm;
 	}
+	current->mm->mmap = vmas[0];
 	kfree(vcopy);
 }
 
