@@ -161,7 +161,10 @@ static void do_ckp_vma(struct pid* pid){
 		printk(KERN_INFO "Got NULL mm\n");
 		goto nul_ret;
 	}
-
+    if(dump_struct(mm, sizeof(struct mm_struct), "/checkpoint/vma/mm.ckpt")){
+        printk(KERN_INFO "Dump struct failed\n");
+        goto nul_ret;
+    }
 	struct vm_area_struct *vma = mm->mmap;
 	if(!vma){
 		printk(KERN_INFO "No vma yet\n");
@@ -273,6 +276,11 @@ static void do_rst_vma(struct pid* pid){
 	int next_vma = 0;
 	struct vm_area_struct *vcopy = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 	struct vm_area_struct *prev = NULL;
+    struct mm_struct *old_mm = kzalloc(sizeof(struct mm_struct), GFP_KERNEL);
+    if(read_struct(old_mm, sizeof(struct mm_struct), "/checkpoint/vma/mm.ckpt")){
+        printk(KERN_INFO "do_rst_vma: read struct failed\n");
+        return;
+    }
 	int len;
 	if(read_struct(&len, sizeof(int), "./checkpoint/vma/len.ckpt") != sizeof(int)){
 		printk(KERN_INFO "do_rst_vma: read struct failed\n");
@@ -302,6 +310,7 @@ static void do_rst_vma(struct pid* pid){
 		vma->vm_mm = current->mm;
 	}
 	current->mm->mmap = vmas[0];
+    current->active_mm->mmap = vmas[0];
 	kfree(vcopy);
 }
 int written_pages = 0;
@@ -473,11 +482,12 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
 	// struct pid* _pid = find_get_pid(pid);
         // start restoring
         rest_cpu_state(pid);
-	printk(KERN_INFO "starting vma restore");
-	get_vma(current->mm);
-		do_rst_vma(NULL);
+        printk(KERN_INFO "starting vma restore\n");
 		get_vma(current->mm);
-		printk(KERN_INFO "starting mem restore");
+		do_rst_vma(NULL);
+        printk(KERN_INFO "After\n");
+		get_vma(current->mm);
+		printk(KERN_INFO "starting mem restore\n");
 		do_rst_mem(NULL);
 		// finished
         
