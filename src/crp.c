@@ -25,6 +25,30 @@ int main(int argc, char *argv[])
     }
     if(strcmp(command, "checkpoint") == 0)
     {
+        // create directories
+        if (mkdir("./checkpoint", S_IRWXU | S_IRWXG | S_IRWXO) == -1) {
+            printf("Error: while creating ./checkpoint");
+            printf("Error: %s\n", strerror(errno));
+        }
+
+        if(mkdir("./checkpoint/vma", S_IRWXU | S_IRWXG | S_IRWXO) == -1)
+        {
+            printf("Error: while creating ./checkpoint/vma");
+            printf("Error: %s\n", strerror(errno));
+        }
+
+        if(mkdir("./checkpoint/mem", S_IRWXU | S_IRWXG | S_IRWXO) == -1)
+        {
+            printf("Error: while creating ./checkpoint/mem");
+            printf("Error: %s\n", strerror(errno));
+        }
+
+        if(mkdir("./checkpoint/page", S_IRWXU | S_IRWXG | S_IRWXO) == -1)
+        {
+            printf("Error: while creating ./checkpoint/page");
+            printf("Error: %s\n", strerror(errno));
+        }
+        
         unsigned long args[2] = {0, pid};
 	unsigned long x = 1;
         printf("checkpoint %d pid %d %x\n", args[0], args[1], args);

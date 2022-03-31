@@ -10,7 +10,7 @@ LIB_OBJ=lib
 OBJ=obj
 BENCH_SRC=benchmark-test
 BENCH_OBJ=bech-obj
-
+CKPT=checkpoint
 
 # src = $(wildcard Examples/*.c)
 
@@ -30,4 +30,4 @@ $(OBJ)/%.o: $(SRC)/%.c $(HDRS)
 
 .PHONY: clean
 clean:
-	rm -rf $(OBJ) $(LIB) $(BENCH_OBJ)
+	rm -rf $(OBJ) $(LIB) $(BENCH_OBJ) $(CKPT)

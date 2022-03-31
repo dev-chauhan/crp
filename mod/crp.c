@@ -17,12 +17,14 @@
 #include<linux/kallsyms.h>
 #include<linux/sched/task_stack.h>
 #include<linux/ptrace.h>
+#include<linux/highmem.h>
 
 #include "crp.h"
 
 #define DEVNAME "crp"
 #define MAX_FNAME 60
 // #define PAGE_SIZE 1 << 12
+#define CURR_DIR "."
 
 static int major;
 atomic_t  device_opened;
@@ -141,7 +143,7 @@ static void do_ckp_vma(struct pid* pid){
 		block->vm_end = vma->vm_end;
 		block->vm_next = (uint64_t)vma->vm_next;
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "vma_%d.ckpt", id++);
+		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);
 		printk("Checkpointing at %s\n", fname);
 		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
 			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
@@ -159,25 +161,51 @@ nul_ret:
 	return;
 }
 
-static void do_ckp_mem(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
+static void do_ckp_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
 	// Iterate over and copy to /checkpoint/mem/randomid
 	unsigned long address;
 	int id = 0;
 	for (address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
 		pte_t* ptep = get_pte(address, mm);
+		if(!ptep) continue;
 		struct page* curr = pte_page(*ptep);
 		char fname[MAX_FNAME];
 		// This would result in segfault -- folders need to be created. 
-		snprintf(fname, MAX_FNAME, "/home/paras/Desktop/checkpoint/page/%lx.ckpt",address);
+		snprintf(fname, MAX_FNAME, "%s/checkpoint/page/%lx.ckpt", CURR_DIR, address);
 		dump_struct((char*)curr, sizeof(struct page), fname);
 
-		snprintf(fname, MAX_FNAME, "/home/paras/Desktop/checkpoint/mem/%lx.ckpt", address);
-		dump_struct((char*)curr, PAGE_SIZE, fname);            // TODO: get page from struct page
+		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%lx.ckpt", CURR_DIR, address);
+		unsigned long mapped_page = kmap(curr);
+		dump_struct((char*)mapped_page, PAGE_SIZE, fname);
+		kunmap(mapped_page);
 	}
 	// put_task_struct(proc);
 	return;
 }
 
+static void do_ckp_mem(struct pid* pid){
+	struct task_struct* proc = get_pid_task(pid, PIDTYPE_PID);
+	if (!proc){
+		printk(KERN_INFO "Got NULL proc\n");
+		goto nul_ret;
+	}
+	struct mm_struct* mm = proc->mm;
+	if (!mm){
+		printk(KERN_INFO "Got NULL mm\n");
+		goto nul_ret;
+	}
+	struct vm_area_struct* vma = mm->mmap;
+	if(!vma){
+		printk(KERN_INFO "No vma yet\n");
+		goto nul_ret;
+	}
+	while(vma){
+		do_ckp_mem_vma(pid, mm, vma);
+		vma = vma->vm_next;
+	}
+	put_task_struct(proc);
+	return;
+}
 // static void do_ckp_proc(struct pid* pid){
 //         struct task_struct* proc = get_pid_task(pid);
         
@@ -207,7 +235,7 @@ static void do_rst_vma(struct pid* pid){
 		// allocate buffer and read vma. 
 		struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "vma%d.ckpt", next_vma);		// directory structure 
+		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", next_vma);		// directory structure 
 		read_struct(vcopy, sizeof(struct vma_copy), fname);
 		vma->vm_start = vcopy->vm_start;
 		vma->vm_end = vcopy->vm_end;
@@ -223,7 +251,7 @@ static void do_rst_vma(struct pid* pid){
 	kfree(vcopy);
 }
 
-static void do_rst_mem(struct pid* pid, struct vm_area_struct* vma){
+static void do_rst_mem_vma(struct pid* pid, struct vm_area_struct* vma){
 	// iterate over address space
 	unsigned long address;
 	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
@@ -231,12 +259,42 @@ static void do_rst_mem(struct pid* pid, struct vm_area_struct* vma){
 		// Directly allocate a page and copy to it if possible, don't think linux allows that. 
 		char* curr = kzalloc(PAGE_SIZE, GFP_KERNEL);			
 		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "/home/paras/Desktop/checkpoint/vma/%ld.ckpt", address);
-		read_struct(curr, PAGE_SIZE, fname);
+		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%ld.ckpt", CURR_DIR, address);
+		if(read_struct(curr, PAGE_SIZE, fname) < 0){ // file does not exist
+			continue;
+		}
 		// Allocate page in user space how tf do I do this. 
-		// copy_to_user(page_addr, curr); ??? 
+		if(copy_to_user(address, curr, PAGE_SIZE) != 0){
+            printk(KERN_INFO "cannot write to %p\n", address);
+            return;
+        }
 		// Put this page into page table. 
 	}	
+}
+
+static void do_rst_mem(struct pid* pid){
+	struct task_struct* proc = current;
+	if (!proc){
+		printk(KERN_INFO "Got NULL proc\n");
+		goto nul_ret;
+	}
+	struct mm_struct* mm = proc->mm;
+	if (!mm){
+		printk(KERN_INFO "Got NULL mm\n");
+		goto nul_ret;
+	}
+	struct vm_area_struct* vma = mm->mmap;
+	if(!vma){
+		printk(KERN_INFO "No vma yet\n");
+		goto nul_ret;
+	}
+	while(vma){
+		do_rst_mem_vma(pid, mm, vma);
+		vma = vma->vm_next;
+	}
+	flush_tlb_mm(mm);
+	// put_task_struct(proc);
+	return;
 }
 
 // static void do_rst_proc(struct pid* pid){
@@ -312,8 +370,9 @@ static ssize_t demo_read(struct file *filp,
         }
         printk(KERN_INFO "task %d status %ld\n", task->pid, task->state);
         // start checkpointing
-        // ckpt_cpu_state(pid);
+        ckpt_cpu_state(pid);
         do_ckp_vma(_pid);
+		do_ckp_mem(_pid);
         // finished
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
@@ -348,9 +407,9 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         
         // start restoring
-	/*
         rest_cpu_state(pid);
-    */  
+		do_rst_vma(_pid);
+		do_rst_mem(_pid);
 		// finished
         
         return length;
