@@ -112,7 +112,7 @@ int read_struct(void* buff, int length, char* fname){
 }
 
 static void do_ckp_vma(struct pid* pid){
-	struct vma_copy* block;
+	struct vm_area_struct* block;
 	int id = 1;
 	struct task_struct* proc = get_pid_task(pid, PIDTYPE_PID);
 	if (!proc){
@@ -132,23 +132,20 @@ static void do_ckp_vma(struct pid* pid){
 		goto nul_ret;
 	}
 	// ID should be some random hash
-	block = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
+	block = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 	if (!block){
 		printk(KERN_INFO "Can't allocate memory\n");
 		goto nul_ret;
 	}
 	// printk(KERN_INFO "before while\n");
 	while(vma){
-		block->vm_flags = vma->vm_flags;
-		block->vm_start = vma->vm_start;
-		block->vm_end = vma->vm_end;
-		block->vm_next = (uint64_t)vma->vm_next;
+		*block = *vma;
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);
 		// printk("Checkpointing at %s\n", fname);
 		if(block->vm_next != NULL) block->vm_next = id;
 		if(block->vm_prev != NULL) block->vm_prev = id-2;
-		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
+		if(dump_struct(block, sizeof(struct vm_area_struct), fname) != sizeof(struct vm_area_struct)){
 			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
 			return;
 		}
@@ -237,7 +234,7 @@ static void do_rst_vma(struct pid* pid){
 	// Just restore the vma's
 	// We might need to return the vma(head) kernel address. 
 	int next_vma = 0;
-	struct vma_copy *vcopy = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
+	struct vm_area_struct *vcopy = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 	struct vm_area_struct *prev = NULL;
 	int len;
 	if(read_struct(&len, sizeof(int), "./checkpoint/vma/len.ckpt") != sizeof(int)){
@@ -254,11 +251,8 @@ static void do_rst_vma(struct pid* pid){
 		struct vm_area_struct * vma = vmas[next_vma-1];
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", next_vma);		// directory structure 
-		read_struct(vcopy, sizeof(struct vma_copy), fname);
-		vma->vm_start = vcopy->vm_start;
-		vma->vm_end = vcopy->vm_end;
-		vma->vm_next = vcopy->vm_next;
-		vma->vm_prev = vcopy->vm_prev;
+		read_struct(vcopy, sizeof(struct vm_area_struct), fname);
+		*vma = *vcopy;
 
 		// get the kernel space addr from vmas[ ] array
 		if(vma->vm_next != NULL) vma->vm_next = vmas[(int)(vma->vm_next)];
@@ -273,7 +267,7 @@ static void do_rst_vma(struct pid* pid){
 	current->mm->mmap = vmas[0];
 	kfree(vcopy);
 }
-
+int written_pages = 0;
 static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
 	// iterate over address space
 	unsigned long address;
@@ -295,12 +289,14 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
             printk(KERN_INFO "cannot write to %p\n", address);
             return;
         }
+		written_pages++;
 		kfree(curr);
 		// Put this page into page table. 
 	}	
 }
 
 static void do_rst_mem(struct pid* pid){
+	written_pages = 0;
 	struct task_struct* proc = current;
 	if (!proc){
 		printk(KERN_INFO "Got NULL proc\n");
@@ -321,6 +317,7 @@ static void do_rst_mem(struct pid* pid){
 		vma = vma->vm_next;
 	}
 	flush_cache_mm(mm);
+	printk(KERN_INFO "memory pages restored: %d\n", written_pages);
 nul_ret:
 	// put_task_struct(proc);
 	return;
