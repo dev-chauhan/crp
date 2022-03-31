@@ -292,8 +292,8 @@ static void do_rst_vma(struct pid* pid){
 		*vma = *vcopy;
 
 		// get the kernel space addr from vmas[ ] array
-		if(vma->vm_next != NULL) vma->vm_next = vmas[(int)(vma->vm_next)];
-		if(vma->vm_prev != NULL) vma->vm_prev = vmas[(int)(vma->vm_prev)];
+		if(vma->vm_next != NULL) vma->vm_next = vmas[(int)(vma->vm_next) - 1];
+		if(vma->vm_prev != NULL) vma->vm_prev = vmas[(int)(vma->vm_prev) - 1];
 		// Update next_vma by lookup using vcopy->vm_next
 		// next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
 		next_vma = vcopy->vm_next; // TODO: use hashmap in future, works for now
