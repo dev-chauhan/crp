@@ -145,6 +145,7 @@ static void do_ckp_vma(struct pid* pid){
 		block->vm_next = (uint64_t)vma->vm_next;
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);
+		printk(KERN_INFO "start: %p, end: %p\n", vma->vm_start, vma->vm_end);
 		// printk("Checkpointing at %s\n", fname);
 		if(dump_struct(block, sizeof(struct vma_copy), fname) != sizeof(struct vma_copy)){
 			printk(KERN_INFO "do_ckp_vma: dump struct failed\n");
@@ -208,107 +209,6 @@ static void do_ckp_mem(struct pid* pid){
 nul_ret:
 	return;
 }
-// static void do_ckp_proc(struct pid* pid){
-//         struct task_struct* proc = get_pid_task(pid);
-        
-//         // Iterate over and copy to /checkpoint/proc/randomid
-
-//         put_task_struct(proc);
-//         return;
-// }
-
-// Restore functions 
-
-// TODO: get id for the address. 
-static int get_id(int address){
-	static int id_count = 0;
-	return id_count++;
-}
-
-static void do_rst_vma(struct pid* pid){
-	// checkpoint path : /home/paras/Desktop/checkpoint/
-	// The process has already been "created". 
-	// Just restore the vma's
-	// We might need to return the vma(head) kernel address. 
-	int next_vma = 0;
-	struct vma_copy *vcopy = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
-	struct vm_area_struct *prev = NULL;
-	while(next_vma > 0){
-		// allocate buffer and read vma. 
-		struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
-		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", next_vma);		// directory structure 
-		read_struct(vcopy, sizeof(struct vma_copy), fname);
-		vma->vm_start = vcopy->vm_start;
-		vma->vm_end = vcopy->vm_end;
-		if (prev){
-			prev->vm_next = vma;
-		}
-		prev = vma;
-		vma->vm_next = NULL;			// This will be generated in the next iteration, recursive approach?
-		// Update next_vma by lookup using vcopy->vm_next
-		next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
-		// restore pages for this vma
-	}
-	kfree(vcopy);
-}
-
-static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
-	// iterate over address space
-	unsigned long address;
-	printk(KERN_INFO "%p %p\n", mm, vma);
-	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
-		// allocate a buffer of size page and read a page to it. 
-		// Directly allocate a page and copy to it if possible, don't think linux allows that. 
-		char* curr = kzalloc(PAGE_SIZE, GFP_KERNEL);			
-		char fname[MAX_FNAME];
-		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%lx.ckpt", CURR_DIR, address);
-		// printk(KERN_INFO "%p %s\n", address, fname);
-		
-		if(read_struct(curr, PAGE_SIZE, fname) < 0){ // file does not exist
-			kfree(curr);
-			continue;
-		}
-		// Allocate page in user space how tf do I do this. 
-		if(copy_to_user(address, curr, PAGE_SIZE) != 0){
-            printk(KERN_INFO "cannot write to %p\n", address);
-            return;
-        }
-		kfree(curr);
-		// Put this page into page table. 
-	}	
-}
-
-static void do_rst_mem(struct pid* pid){
-	struct task_struct* proc = current;
-	if (!proc){
-		printk(KERN_INFO "Got NULL proc\n");
-		goto nul_ret;
-	}
-	struct mm_struct* mm = proc->mm;
-	if (!mm){
-		printk(KERN_INFO "Got NULL mm\n");
-		goto nul_ret;
-	}
-	struct vm_area_struct* vma = mm->mmap;
-	if(!vma){
-		printk(KERN_INFO "No vma yet\n");
-		goto nul_ret;
-	}
-	while(vma){
-		do_rst_mem_vma(pid, mm, vma);
-		vma = vma->vm_next;
-	}
-	flush_cache_mm(mm);
-nul_ret:
-	// put_task_struct(proc);
-	return;
-}
-
-// static void do_rst_proc(struct pid* pid){
-
-// }
-
 
 static int demo_open(struct inode *inode, struct file *file)
 {
@@ -347,13 +247,14 @@ static void ckpt_cpu_state(pid_t pidno){
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
     printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 	char fname[MAX_FNAME];
-	snprintf(fname, MAX_FNAME, "cpu_state.ckpt", pidno);
+	snprintf(fname, MAX_FNAME, "./checkpoint/cpu_state.ckpt", pidno);
     if(dump_struct(regs, sizeof(struct pt_regs), fname) != sizeof(struct pt_regs)){
         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
         return;
     }
     printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
     printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
+	put_pid(_pid);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -382,8 +283,8 @@ static ssize_t demo_read(struct file *filp,
         do_ckp_vma(_pid);
 		do_ckp_mem(_pid);
         // finished
-        kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
+		kill_pid(_pid, SIGCONT, 1);
         
         return length;
     }
@@ -395,12 +296,111 @@ static void rest_cpu_state(pid_t pidno){
     struct pt_regs* regs = current_pt_regs();
     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
     printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
-    if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
+    if(read_struct(regs, sizeof(struct pt_regs), "./checkpoint/cpu_state.ckpt") != sizeof(struct pt_regs)){
         printk(KERN_INFO "rest_cpu_state: dump struct failed\n");
         return;
     }
     printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
     printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
+}
+
+
+// Restore functions 
+
+// TODO: get id for the address. 
+// static int get_id(int address){
+// 	static int id_count = 0;
+// 	return id_count++;
+// }
+
+static void do_rst_vma(pid_t pid){
+	// checkpoint path : /home/paras/Desktop/checkpoint/
+	// The process has already been "created". 
+	// Just restore the vma's
+	// We might need to return the vma(head) kernel address. 
+	uint64_t next_vma = 1;
+	int id = 0;
+	struct vma_copy *vcopy = kzalloc(sizeof(struct vma_copy), GFP_KERNEL);
+	struct vm_area_struct *prev = NULL;
+	struct task_struct *proc = current;				// Need to free existing vma's
+	while(next_vma > 0){
+		// allocate buffer and read vma. 
+		struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
+		char fname[MAX_FNAME];
+		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", id++);		// directory structure 
+		read_struct(vcopy, sizeof(struct vma_copy), fname);
+		vma->vm_start = vcopy->vm_start;
+		vma->vm_end = vcopy->vm_end;
+		printk(KERN_INFO "restore: start - %p, end - %p\n", vma->vm_start, vma->vm_end);
+		if (prev){
+			prev->vm_next = vma;
+		}
+		else{
+			// head 
+			if (!proc->mm)
+				printk(KERN_INFO "do_rst_vma: mm not present\n");
+			proc->mm->mmap = vma;
+		}
+		prev = vma;
+		vma->vm_next = NULL;			// This will be generated in the next iteration, recursive approach?
+		next_vma = vcopy->vm_next;
+		// Update next_vma by lookup using vcopy->vm_next
+		// next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
+		// restore pages for this vma
+	}
+	kfree(vcopy);
+}
+
+static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area_struct* vma){
+	// iterate over address space
+	unsigned long address;
+	// printk(KERN_INFO "VMA start:%p  end:%p\n", vma->vm_start, vma->vm_end);
+	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
+		// allocate a buffer of size page and read a page to it. 
+		// Directly allocate a page and copy to it if possible, don't think linux allows that. 
+		char* curr = kzalloc(PAGE_SIZE, GFP_KERNEL);			
+		char fname[MAX_FNAME];
+		snprintf(fname, MAX_FNAME, "%s/checkpoint/mem/%lx.ckpt", CURR_DIR, address);
+		// printk(KERN_INFO "%p %s\n", address, fname);
+		
+		if(read_struct(curr, PAGE_SIZE, fname) < 0){ // file does not exist
+			kfree(curr);
+			continue;
+		}
+		// Allocate page in user space how tf do I do this. 
+		if(copy_to_user(address, curr, PAGE_SIZE) != 0){
+            printk(KERN_INFO "cannot write to %p\n", address);
+            return;
+        }
+		kfree(curr);
+		// Put this page into page table. 
+	}	
+}
+
+static void do_rst_mem(struct pid* pid){
+	struct task_struct* proc = current;			// I doubt this would work. 
+	if (!proc){
+		printk(KERN_INFO "Got NULL proc\n");
+		goto nul_ret;
+	}
+	struct mm_struct* mm = proc->mm;
+	if (!mm){
+		printk(KERN_INFO "Got NULL mm\n");
+		goto nul_ret;
+	}
+	struct vm_area_struct* vma = mm->mmap;
+	if(!vma){
+		printk(KERN_INFO "No vma yet\n");
+		goto nul_ret;
+	}
+	while(vma){
+		do_rst_mem_vma(pid, mm, vma);
+		vma = vma->vm_next;
+	}
+	flush_cache_mm(mm);
+nul_ret:
+	// put_task_struct(proc);
+	return;
 }
 
 static ssize_t
@@ -414,14 +414,15 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         
-	// struct pid* _pid = find_get_pid(pid);
+		// struct pid* _pid = find_get_pid(pid);
         // start restoring
         rest_cpu_state(pid);
-	printk(KERN_INFO "starting vma restore");
+		printk(KERN_INFO "starting vma restore");
 		do_rst_vma(NULL);
 		printk(KERN_INFO "starting mem restore");
 		do_rst_mem(NULL);
 		// finished
+		printk(KERN_INFO "finished restore\n");
         
         return length;
     }
