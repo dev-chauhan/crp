@@ -245,11 +245,13 @@ static void do_rst_vma(struct pid* pid){
 		return;
 	}
 	struct vm_area_struct *vmas[len]; // TODO: use hashmap in future, works for now
-	for(int i=0; i < len; i++) vmas[i] = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
+	int i;
+	for(i=0; i < len; i++) vmas[i] = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 	next_vma = 1;
 	while(next_vma > 0){
 		// allocate buffer and read vma. 
 		// struct vm_area_struct *vma = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
+		struct vm_area_struct * vma = vmas[next_vma-1];
 		char fname[MAX_FNAME];
 		snprintf(fname, MAX_FNAME, "./checkpoint/vma/%d.ckpt", next_vma);		// directory structure 
 		read_struct(vcopy, sizeof(struct vma_copy), fname);
@@ -259,11 +261,11 @@ static void do_rst_vma(struct pid* pid){
 		vma->vm_prev = vcopy->vm_prev;
 
 		// get the kernel space addr from vmas[ ] array
-		if(vma->vm_next != NULL) vma->vm_next = vmas[vma->vm_next];
-		if(vma->vm_prev != NULL) vma->vm_prev = vmas[vma->vm_prev];
+		if(vma->vm_next != NULL) vma->vm_next = vmas[(int)(vma->vm_next)];
+		if(vma->vm_prev != NULL) vma->vm_prev = vmas[(int)(vma->vm_prev)];
 		// Update next_vma by lookup using vcopy->vm_next
 		// next_vma = get_id(vcopy->vm_next);		// get_id is not implemented yet
-		next_vma++; // TODO: use hashmap in future, works for now
+		next_vma = vcopy->vm_next; // TODO: use hashmap in future, works for now
 		// restore pages for this vma
 		// set vm_mm
 		vma->vm_mm = current->mm;
