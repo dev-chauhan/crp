@@ -18,6 +18,7 @@
 #include<linux/sched/task_stack.h>
 #include<linux/ptrace.h>
 #include<linux/highmem.h>
+#include<linux/vmacache.h>
 
 #include "crp.h"
 
@@ -31,10 +32,11 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
-// unsigned long (*kln)(const char *) = 0xffffffffa5344fc0;
+unsigned long (*kln)(const char *) = 0xffffffffac744fc0;
+struct mm_struct * (*crp_dup_mm)(struct task_struct* tsk, struct mm_struct * oldmm);
 
 static unsigned long gptr;
-
+static unsigned long tmpvar;
 // checkpointing functions
 
 static pte_t* get_pte(unsigned long address, struct mm_struct* mm){
@@ -161,7 +163,7 @@ static void do_ckp_vma(struct pid* pid){
 		printk(KERN_INFO "Got NULL mm\n");
 		goto nul_ret;
 	}
-    if(dump_struct(mm, sizeof(struct mm_struct), "/checkpoint/vma/mm.ckpt")!= sizeof(struct mm_struct)){
+    if(dump_struct(mm, sizeof(struct mm_struct), "./checkpoint/vma/mm.ckpt")!= sizeof(struct mm_struct)){
         printk(KERN_INFO "Dump struct failed\n");
         goto nul_ret;
     }
@@ -273,11 +275,12 @@ static void do_rst_vma(struct pid* pid){
 	// The process has already been "created". 
 	// Just restore the vma's
 	// We might need to return the vma(head) kernel address. 
+	struct task_struct * task = get_pid_task(pid, PIDTYPE_PID);
 	int next_vma = 0;
 	struct vm_area_struct *vcopy = kzalloc(sizeof(struct vm_area_struct), GFP_KERNEL);
 	struct vm_area_struct *prev = NULL;
     struct mm_struct *old_mm = kzalloc(sizeof(struct mm_struct), GFP_KERNEL);
-    if(read_struct(old_mm, sizeof(struct mm_struct), "/checkpoint/vma/mm.ckpt") != sizeof(struct mm_struct)){
+    if(read_struct(old_mm, sizeof(struct mm_struct), "./checkpoint/vma/mm.ckpt") != sizeof(struct mm_struct)){
         printk(KERN_INFO "do_rst_vma: read struct failed\n");
         return;
     }
@@ -307,10 +310,21 @@ static void do_rst_vma(struct pid* pid){
 		next_vma = vcopy->vm_next; // TODO: use hashmap in future, works for now
 		// restore pages for this vma
 		// set vm_mm
-		vma->vm_mm = current->mm;
+		vma->vm_mm = old_mm;
 	}
-	current->mm->mmap = vmas[0];
-    current->active_mm->mmap = vmas[0];
+	old_mm->mmap = vmas[0];
+	
+	// dup_mm on current task
+	vmacache_flush(current);
+	// old_mm = task->mm;
+	// printk(KERN_INFO "%lx %lx %lx ---\n", current->mm, old_mm, current->active_mm);
+	// struct mm_struct * new_mm = crp_dup_mm(current, old_mm);
+	// struct mm_struct* new_mm = old_mm;
+	// printk(KERN_INFO "%lx %lx %lx ---\n", new_mm, old_mm, vmas[0]);
+	current->mm = task->mm;
+	current->active_mm = task->active_mm;
+
+	// crp_free_mm(curr_mm);
 	kfree(vcopy);
 }
 int written_pages = 0;
@@ -332,6 +346,9 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 		}
 		// Allocate page in user space how tf do I do this.
 		int err; 
+		if((err = copy_from_user(curr, address, PAGE_SIZE)) != 0){
+            printk(KERN_INFO "cannot read from %p, err %d\n", address, err);
+		}
 		if((err = copy_to_user(address, curr, PAGE_SIZE)) != 0){
             printk(KERN_INFO "cannot write to %p, err %d\n", address, err);
             return;
@@ -479,17 +496,27 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         int pid = args[1];
         printk(KERN_INFO "command = %d, pid = %d\n", command, pid);
         
-	// struct pid* _pid = find_get_pid(pid);
+	struct pid* _pid = find_get_pid(pid);
+        kill_pid(_pid, SIGSTOP, 1);
+        struct task_struct* task = get_pid_task(_pid, PIDTYPE_PID);
+        if(task == NULL){
+            printk(KERN_INFO "task is null\n");
+            return -1;
+        }
         // start restoring
         rest_cpu_state(pid);
         printk(KERN_INFO "starting vma restore\n");
 		get_vma(current->mm);
-		do_rst_vma(NULL);
-        printk(KERN_INFO "After\n");
+		do_rst_vma(_pid);
+        memset(&(current->mm->rss_stat), 0, sizeof(current->mm->rss_stat));
+		printk(KERN_INFO "After\n");
 		get_vma(current->mm);
 		printk(KERN_INFO "starting mem restore\n");
-		do_rst_mem(NULL);
+		// do_rst_mem(_pid);
 		// finished
+        // kill_pid(_pid, SIGCONT, 1);
+        put_pid(_pid);
+        
         
         return length;
     }
@@ -538,8 +565,9 @@ int init_module(void)
  
         printk(KERN_INFO "I was assigned major number %d. To talk to\n", major);                                                              
         atomic_set(&device_opened, 0);
-       
-// 	printk(KERN_INFO "dup_mm: %x kln: %x dup_mm: %p\n", kln("dup_mm"), kln, kln("dup_mm"));
+	printk(KERN_INFO "here\n");
+	// crp_dup_mm = kln("dup_mm");
+	// printk(KERN_INFO "dup_mm: %lx kln: %lx dup_mm: %p\n", crp_dup_mm, kln, kln("dup_mm"));
 	return 0;
 
 error_device:
