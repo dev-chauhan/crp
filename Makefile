@@ -22,7 +22,7 @@ all: bin/crp
 
 bin/crp: $(OBJ)/crp.o
 	mkdir -p bin
-	$(CC) -o $@ $<
+	$(CC) -static -o $@ $<
 
 $(OBJ)/%.o: $(SRC)/%.c $(HDRS)
 	mkdir -p obj

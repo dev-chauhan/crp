@@ -1,0 +1,30 @@
+#!/bin/bash
+
+FAILTYPE=failslab
+echo Y > /sys/kernel/debug/$FAILTYPE/task-filter
+echo 10 > /sys/kernel/debug/$FAILTYPE/probability
+echo 100 > /sys/kernel/debug/$FAILTYPE/interval
+printf %#x -1 > /sys/kernel/debug/$FAILTYPE/times
+echo 0 > /sys/kernel/debug/$FAILTYPE/space
+echo 2 > /sys/kernel/debug/$FAILTYPE/verbose
+echo 1 > /sys/kernel/debug/$FAILTYPE/ignore-gfp-wait
+
+faulty_system()
+{
+    bash -c "echo 1 > /proc/self/make-it-fail && exec $*"
+}
+
+if [ $# -eq 0 ]
+then
+    echo "Usage: $0 modulename [ modulename ... ]"
+    exit 1
+fi
+
+for m in $*
+do
+    echo inserting $m...
+    faulty_system modprobe $m
+
+    echo removing $m...
+    faulty_system modprobe -r $m
+done

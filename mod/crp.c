@@ -19,6 +19,8 @@
 #include<linux/ptrace.h>
 #include<linux/highmem.h>
 #include<linux/vmacache.h>
+#include<linux/fdtable.h>
+#include<asm/fsgsbase.h>
 
 #include "crp.h"
 
@@ -332,6 +334,8 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 	// iterate over address space
 	unsigned long address;
 	printk(KERN_INFO "%p %p\n", mm, vma);
+	printk(KERN_INFO "vma area: %lx %lx\n", vma->vm_start, vma->vm_end);
+	vma->vm_flags |= VM_WRITE;
 	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
 		// allocate a buffer of size page and read a page to it. 
 		// Directly allocate a page and copy to it if possible, don't think linux allows that. 
@@ -345,18 +349,20 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 			continue;
 		}
 		// Allocate page in user space how tf do I do this.
-		int err; 
+		int err;
+	       printk(KERN_INFO "writing vm: %lx", address);	
 		if((err = copy_from_user(curr, address, PAGE_SIZE)) != 0){
-            printk(KERN_INFO "cannot read from %p, err %d\n", address, err);
+            printk(KERN_INFO "cannot read from %lx, err %d\n", address, err);
 		}
 		if((err = copy_to_user(address, curr, PAGE_SIZE)) != 0){
-            printk(KERN_INFO "cannot write to %p, err %d\n", address, err);
+            printk(KERN_INFO "cannot write to %lx, err %d\n", address, err);
             return;
         }
 		written_pages++;
 		kfree(curr);
 		// Put this page into page table. 
 	}	
+	printk(KERN_INFO "restore vmas: written pages %d", written_pages);
 }
 
 static void do_rst_mem(struct pid* pid){
@@ -426,16 +432,25 @@ static void ckpt_cpu_state(pid_t pidno){
     }
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = task_pt_regs(task);
-    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
+    struct pt_regs tmpregs = *regs;
+    struct thread_struct tmpts = task->thread;
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld %ld %ld\n", regs->ax, regs->ax, tmpregs.ax);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld %ld\n", regs->ax, regs->r15);
+    unsigned long rax = regs->ax;
     printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 	char fname[MAX_FNAME];
 	snprintf(fname, MAX_FNAME, "cpu_state.ckpt", pidno);
-    if(dump_struct(regs, sizeof(struct pt_regs), fname) != sizeof(struct pt_regs)){
+    if(dump_struct(&tmpregs, sizeof(struct pt_regs), fname) != sizeof(struct pt_regs)){
         printk(KERN_INFO "ckpt_cpu_state: dump struct failed\n");
         return;
     }
-    printk(KERN_INFO "ckpt_cpu_state: rax reg %d\n", regs->ax);
-    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
+    if(dump_struct(&tmpts, sizeof(struct thread_struct), "thread_struct.ckpt") != sizeof(struct thread_struct)){
+	    printk(KERN_INFO "ckpt: dump thread struct failed\n");
+	    return ;
+    }
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld %ld\n", regs->ax, tmpregs.ax);
+    printk(KERN_INFO "ckpt_cpu_state: cs-ip reg %lx-%lx %lx %lx\n", regs->cs, regs->ip, tmpts.fsbase, task->thread.fsbase);
+    // printk(KERN_INFO "ckpt_cpu_state: instruction at ip %lx\n", regs->ip);
 }
 
 static ssize_t demo_read(struct file *filp,
@@ -462,8 +477,12 @@ static ssize_t demo_read(struct file *filp,
         // start checkpointing
         ckpt_cpu_state(pid);
         do_ckp_vma(_pid);
-		do_ckp_mem(_pid);
+	do_ckp_mem(_pid);
         // finished
+	struct fdtable *files_table;
+	//files_table = files_fdtable(task->files);
+	// printk(KERN_INFO "f_pos: %d\n", files_table->fd[0]->f_pos);
+	//files_table->fd[0]->f_pos = 1;
         kill_pid(_pid, SIGCONT, 1);
         put_pid(_pid);
         
@@ -475,13 +494,23 @@ static ssize_t demo_read(struct file *filp,
 static void rest_cpu_state(pid_t pidno){
     // struct pt_regs* regs = task->thread.regs;
     struct pt_regs* regs = current_pt_regs();
-    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    
+    printk(KERN_INFO "rest_cpu_state: rax reg %ld %ld\n", regs->ax, regs->ax);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld %lx\n", regs->ax, current->thread.fsbase);
     printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
     if(read_struct(regs, sizeof(struct pt_regs), "cpu_state.ckpt") != sizeof(struct pt_regs)){
         printk(KERN_INFO "rest_cpu_state: dump struct failed\n");
         return;
     }
-    printk(KERN_INFO "rest_cpu_state: rax reg %d\n", regs->ax);
+    struct thread_struct ts;
+    if(read_struct(&ts, sizeof(struct thread_struct), "thread_struct.ckpt") != sizeof(struct thread_struct)){
+	    printk(KERN_INFO "rest_cpu_state: thread struct failed\n");
+   }
+    x86_fsbase_write_cpu(ts.fsbase);
+    current->thread = ts;
+
+    printk(KERN_INFO "rest_cpu_state: rax reg %ld %lx\n", regs->ax, current->thread.fsbase);
+    printk(KERN_INFO "ckpt_cpu_state: rax reg %ld %ld\n", regs->ax, regs->r15);
     printk(KERN_INFO "rest_cpu_state: cs-ip reg %lx-%lx\n", regs->cs, regs->ip);
 }
 
@@ -512,9 +541,11 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
 		printk(KERN_INFO "After\n");
 		get_vma(current->mm);
 		printk(KERN_INFO "starting mem restore\n");
-		// do_rst_mem(_pid);
+		flush_icache_range(0, 0xffffffff);
+		do_rst_mem(_pid);
 		// finished
         // kill_pid(_pid, SIGCONT, 1);
+	// flush_cache_all();
         put_pid(_pid);
         
         
