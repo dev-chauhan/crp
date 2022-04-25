@@ -22,6 +22,7 @@
 #include<linux/fdtable.h>
 #include<asm/fsgsbase.h>
 #include <asm/segment.h>
+#include <linux/sched/mm.h>
 
 #include "crp.h"
 
@@ -35,7 +36,7 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
-unsigned long (*kln)(const char *) = 0xffffffffa9544fc0;
+unsigned long (*kln)(const char *) = 0xffffffffa6744fc0;
 struct mm_struct * (*crp_dup_mm)(struct task_struct* tsk, struct mm_struct * oldmm);
 
 static unsigned long gptr;
@@ -324,6 +325,7 @@ static void do_rst_vma(struct pid* pid){
 	// old_mm = task->mm;
 	// printk(KERN_INFO "%lx %lx %lx ---\n", current->mm, old_mm, current->active_mm);
 	// struct mm_struct * new_mm = crp_dup_mm(current, old_mm);
+	// mmput(current->mm);
 	struct mm_struct * new_mm = crp_dup_mm(current, task->mm);
 	// struct mm_struct* new_mm = old_mm;
 	// printk(KERN_INFO "%lx %lx %lx ---\n", new_mm, old_mm, vmas[0]);
@@ -550,7 +552,6 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
             return -1;
         }
         // start restoring
-        rest_cpu_state(pid);
         printk(KERN_INFO "starting vma restore\n");
 	printk(KERN_DEBUG "current->mm value %lx active %lx\n", current->mm, current->active_mm);
 		get_vma(current->mm);
@@ -564,7 +565,8 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
 		flush_icache_range(0, 0xffffffff);
 		do_rst_mem(_pid);
 		// finished
-        // kill_pid(_pid, SIGCONT, 1);
+        rest_cpu_state(pid);
+        kill_pid(_pid, SIGCONT, 1);
 	// flush_cache_all();
         put_pid(_pid);
         
