@@ -21,6 +21,7 @@
 #include<linux/vmacache.h>
 #include<linux/fdtable.h>
 #include<asm/fsgsbase.h>
+#include <asm/segment.h>
 
 #include "crp.h"
 
@@ -34,7 +35,7 @@ atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
-unsigned long (*kln)(const char *) = 0xffffffffac744fc0;
+unsigned long (*kln)(const char *) = 0xffffffffa9544fc0;
 struct mm_struct * (*crp_dup_mm)(struct task_struct* tsk, struct mm_struct * oldmm);
 
 static unsigned long gptr;
@@ -285,7 +286,9 @@ static void do_rst_vma(struct pid* pid){
     if(read_struct(old_mm, sizeof(struct mm_struct), "./checkpoint/vma/mm.ckpt") != sizeof(struct mm_struct)){
         printk(KERN_INFO "do_rst_vma: read struct failed\n");
         return;
+    
     }
+    // old_mm = current->mm;
 	int len;
 	if(read_struct(&len, sizeof(int), "./checkpoint/vma/len.ckpt") != sizeof(int)){
 		printk(KERN_INFO "do_rst_vma: read struct failed\n");
@@ -321,11 +324,20 @@ static void do_rst_vma(struct pid* pid){
 	// old_mm = task->mm;
 	// printk(KERN_INFO "%lx %lx %lx ---\n", current->mm, old_mm, current->active_mm);
 	// struct mm_struct * new_mm = crp_dup_mm(current, old_mm);
+	struct mm_struct * new_mm = crp_dup_mm(current, task->mm);
 	// struct mm_struct* new_mm = old_mm;
 	// printk(KERN_INFO "%lx %lx %lx ---\n", new_mm, old_mm, vmas[0]);
+	
+/*	
 	current->mm = task->mm;
 	current->active_mm = task->active_mm;
-
+*/	
+	/*
+	current->mm = old_mm;
+	current->active_mm = old_mm;
+	*/
+	current->mm = new_mm;
+	current->active_mm = new_mm;
 	// crp_free_mm(curr_mm);
 	kfree(vcopy);
 }
@@ -335,6 +347,7 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 	unsigned long address;
 	printk(KERN_INFO "%p %p\n", mm, vma);
 	printk(KERN_INFO "vma area: %lx %lx\n", vma->vm_start, vma->vm_end);
+	unsigned long tmpflag = vma->vm_flags;
 	vma->vm_flags |= VM_WRITE;
 	for(address = vma->vm_start; address < vma->vm_end; address+=PAGE_SIZE){
 		// allocate a buffer of size page and read a page to it. 
@@ -356,12 +369,15 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 		}
 		if((err = copy_to_user(address, curr, PAGE_SIZE)) != 0){
             printk(KERN_INFO "cannot write to %lx, err %d\n", address, err);
+	    vma->vm_flags = tmpflag;
             return;
         }
+
 		written_pages++;
 		kfree(curr);
 		// Put this page into page table. 
-	}	
+	}
+	vma->vm_flags = tmpflag;
 	printk(KERN_INFO "restore vmas: written pages %d", written_pages);
 }
 
@@ -506,6 +522,7 @@ static void rest_cpu_state(pid_t pidno){
     if(read_struct(&ts, sizeof(struct thread_struct), "thread_struct.ckpt") != sizeof(struct thread_struct)){
 	    printk(KERN_INFO "rest_cpu_state: thread struct failed\n");
    }
+    loadsegment(fs, ts.fsbase);
     x86_fsbase_write_cpu(ts.fsbase);
     current->thread = ts;
 
@@ -535,8 +552,11 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
         // start restoring
         rest_cpu_state(pid);
         printk(KERN_INFO "starting vma restore\n");
+	printk(KERN_DEBUG "current->mm value %lx active %lx\n", current->mm, current->active_mm);
 		get_vma(current->mm);
+	printk(KERN_DEBUG "current->mm value %lx active %lx\n", current->mm, current->active_mm);
 		do_rst_vma(_pid);
+	printk(KERN_DEBUG "current->mm value %lx active %lx\n", current->mm, current->active_mm);
         memset(&(current->mm->rss_stat), 0, sizeof(current->mm->rss_stat));
 		printk(KERN_INFO "After\n");
 		get_vma(current->mm);
@@ -597,7 +617,7 @@ int init_module(void)
         printk(KERN_INFO "I was assigned major number %d. To talk to\n", major);                                                              
         atomic_set(&device_opened, 0);
 	printk(KERN_INFO "here\n");
-	// crp_dup_mm = kln("dup_mm");
+	crp_dup_mm = kln("dup_mm");
 	// printk(KERN_INFO "dup_mm: %lx kln: %lx dup_mm: %p\n", crp_dup_mm, kln, kln("dup_mm"));
 	return 0;
 
