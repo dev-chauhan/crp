@@ -31,12 +31,14 @@
 // #define PAGE_SIZE 1 << 12
 #define CURR_DIR "."
 
+#define KLN_OFFSET 0xffffffff8c344fc0
+
 static int major;
 atomic_t  device_opened;
 static struct class *demo_class;
 struct device *demo_device;
 
-unsigned long (*kln)(const char *) = 0xffffffffa6744fc0;
+unsigned long (*kln)(const char *) = KLN_OFFSET;
 struct mm_struct * (*crp_dup_mm)(struct task_struct* tsk, struct mm_struct * oldmm);
 
 static unsigned long gptr;
@@ -366,12 +368,15 @@ static void do_rst_mem_vma(struct pid* pid, struct mm_struct* mm, struct vm_area
 		// Allocate page in user space how tf do I do this.
 		int err;
 	       printk(KERN_INFO "writing vm: %lx", address);	
-		if((err = copy_from_user(curr, address, PAGE_SIZE)) != 0){
+		/*if((err = copy_from_user(curr, address, PAGE_SIZE)) != 0){
             printk(KERN_INFO "cannot read from %lx, err %d\n", address, err);
-		}
+		
+		}*/
+		
 		if((err = copy_to_user(address, curr, PAGE_SIZE)) != 0){
             printk(KERN_INFO "cannot write to %lx, err %d\n", address, err);
 	    vma->vm_flags = tmpflag;
+	    kfree(curr);
             return;
         }
 
@@ -562,10 +567,10 @@ demo_write(struct file *filp, const char *buffer, size_t length, loff_t * offset
 		printk(KERN_INFO "After\n");
 		get_vma(current->mm);
 		printk(KERN_INFO "starting mem restore\n");
-		flush_icache_range(0, 0xffffffff);
 		do_rst_mem(_pid);
 		// finished
         rest_cpu_state(pid);
+		flush_icache_range(0, 0xffffffff);
         kill_pid(_pid, SIGCONT, 1);
 	// flush_cache_all();
         put_pid(_pid);
