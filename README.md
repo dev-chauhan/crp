@@ -1,4 +1,4 @@
-# Checkpoint and Restore (CRP)
+# Checkpoint and Restore Process (CRP)
 
 ## Building and preparing
 - Run 'make' in the base directory to build user CLI binary.
